@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from ipaddress import ip_network, collapse_addresses
 from typing import List, Tuple
@@ -6,8 +7,20 @@ from typing import List, Tuple
 import requests
 
 
+# TODO: !!! implement Source as normal instance (not classmethods)
+# TODO: !!! implement cache and etag checking, processing
+
+def serialize_networks(networks: List[ip_network]) -> List[str]:
+    return [str(ip_n) for ip_n in networks]
+
+
+def deserialize_networks(networks: List[str]) -> List[ip_network]:
+    return [ip_network(ip_n) for ip_n in networks]
+
+
 class Source:
     URL: str = None
+    CACHE_FILE = 'cached_sources.json'
 
     @classmethod
     def name(cls):
@@ -18,14 +31,47 @@ class Source:
         raise NotImplemented
 
     @classmethod
-    def get(cls, last_etag: str = '') -> Tuple[List[ip_network], str]:
+    def _get_cache_file(cls):
+        if not os.path.exists(cls.CACHE_FILE):
+            with open(cls.CACHE_FILE, 'w') as f:
+                json.dump(dict(), f)  # create empty cache file if not exists
+
+        with open(cls.CACHE_FILE, 'r') as f:
+            return json.load(f)
+
+    @classmethod
+    def _save_cache(cls, etag, networks):
+        networks = serialize_networks(networks)
+
+        cache = cls._get_cache_file()
+        cache[cls.name()] = {etag: networks}
+
+        with open(cls.CACHE_FILE, 'w') as f:
+            json.dump(cache, f, indent=2)
+
+    # @classmethod
+    # def _check_cache(cls):
+    #     cache = cls._get_cache_file()
+
+    @classmethod
+    def get(cls) -> List[ip_network]:
         if not cls.URL:
             raise NotImplemented
 
-        etag = requests.head(cls.URL).headers.get('ETAG', '')
-        if etag and etag == last_etag:
-            return [], etag
-        return cls._parse(requests.get(cls.URL).text), etag
+        etag = requests.head(cls.URL).headers.get('ETAG', None)
+        if etag:
+            last_etag = list(cls._get_cache_file()[cls.name()].keys())[0]
+
+            if etag == last_etag:
+                print('ETag is the same. Content was not changed.')
+                # TODO: return from cache?
+                return deserialize_networks(cls._get_cache_file()[cls.name()][last_etag])
+                # TODO: refactor
+
+        networks = cls._parse(requests.get(cls.URL).text)
+        cls._save_cache(etag, networks)
+
+        return networks
 
 
 class ZaboronaHelpBase(Source):
@@ -59,7 +105,7 @@ class UABlackList(Source):
 
     @classmethod
     def _parse(cls, content: str) -> List[ip_network]:
-        return [ip_network(ip_n) for ip_n in json.loads(content)]
+        return deserialize_networks(json.loads(content))
 
 
 class NetworksHandler:
@@ -76,8 +122,8 @@ class NetworksHandler:
         self.networks = []
         for src in self.sources:
             try:
-                networks, src_etag = src.get()
-                print(f'Networks from source "{src.name()}" received. Got: {len(networks)} items. ETag: {src_etag}.')
+                networks = src.get()
+                print(f'Networks from source "{src.name()}" received. Got: {len(networks)} items.')
                 self.networks.extend(networks)
             except Exception as error:
                 print(f'Error "{error}" while processing "{src.name()}" source.')
