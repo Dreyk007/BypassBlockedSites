@@ -1,14 +1,10 @@
 import json
-import os
 import re
 from ipaddress import ip_network, collapse_addresses
 from typing import List, Tuple
 
 import requests
 
-
-# TODO: !!! implement Source as normal instance (not classmethods)
-# TODO: !!! implement cache and etag checking, processing
 
 def serialize_networks(networks: List[ip_network]) -> List[str]:
     return [str(ip_n) for ip_n in networks]
@@ -22,72 +18,76 @@ class Source:
     URL: str = None
     CACHE_FILE = 'cached_sources.json'
 
-    @classmethod
-    def name(cls):
-        return cls.__name__
+    def __init__(self):
+        self.cache = None
+        self.last_etag = None
+        self._read_cache()
 
-    @classmethod
-    def _parse(cls, content: str) -> List[ip_network]:
+    @property
+    def name(self) -> str:
+        return self.__class__.__name__
+
+    def _parse(self, content: str) -> List[str]:
         raise NotImplemented
 
-    @classmethod
-    def _get_cache_file(cls):
-        if not os.path.exists(cls.CACHE_FILE):
-            with open(cls.CACHE_FILE, 'w') as f:
-                json.dump(dict(), f)  # create empty cache file if not exists
+    def _read_cache(self):
+        try:
+            with open(self.CACHE_FILE, 'r') as f:
+                self.cache = json.load(f)
+            self.last_etag = self.cache[self.name]['ETag']
+        except FileNotFoundError:
+            self.cache = {self.name: {'ETag': self.last_etag,
+                                      'Networks': []}}
 
-        with open(cls.CACHE_FILE, 'r') as f:
-            return json.load(f)
+    def _save_cache(self, etag: str, networks: List[str]):
+        self.last_etag = etag
+        self.cache[self.name] = {'ETag': self.last_etag,
+                                 'Networks': networks}
+        with open(self.CACHE_FILE, 'w') as f:
+            json.dump(self.cache, f, indent=2)
 
-    @classmethod
-    def _save_cache(cls, etag, networks):
-        networks = serialize_networks(networks)
-
-        cache = cls._get_cache_file()
-        cache[cls.name()] = {etag: networks}
-
-        with open(cls.CACHE_FILE, 'w') as f:
-            json.dump(cache, f, indent=2)
-
-    # @classmethod
-    # def _check_cache(cls):
-    #     cache = cls._get_cache_file()
-
-    @classmethod
-    def get(cls) -> List[ip_network]:
-        if not cls.URL:
+    def get(self) -> Tuple[str, List[str]]:
+        if not self.URL:
             raise NotImplemented
 
-        etag = requests.head(cls.URL).headers.get('ETAG', None)
-        if etag:
-            last_etag = list(cls._get_cache_file()[cls.name()].keys())[0]
+        networks = None
+        new_etag = requests.head(self.URL).headers.get('ETAG', None)
+        if not new_etag or new_etag != self.last_etag:
+            new_etag = None if not new_etag else new_etag  # Set to None if value is not valid
 
-            if etag == last_etag:
-                print('ETag is the same. Content was not changed.')
-                # TODO: return from cache?
-                return deserialize_networks(cls._get_cache_file()[cls.name()][last_etag])
-                # TODO: refactor
+            print('ETag is new or None. Download networks from source.')
+            try:
+                content = requests.get(self.URL).text
+                networks = self._parse(content)
+            except Exception as error:
+                print(f'Error "{error}" during getting new networks. Return from cache.')
+            else:
+                self._save_cache(new_etag, networks)
+                print('ETag and Networks are saved to cache.')
+        else:
+            print('ETag is not identified or the same.')
 
-        networks = cls._parse(requests.get(cls.URL).text)
-        cls._save_cache(etag, networks)
+        if networks is None:
+            print('Return from cache.')
+            networks = self.cache[self.name]['Networks']
 
-        return networks
+        return self.last_etag, networks
 
 
 class ZaboronaHelpBase(Source):
     REGEXP = r'^\s*push\s+[\"\']route\s+(?P<IP>[\d.]+)(\s+(?P<MASK>[\d.]+))?\s*[\"\']'
 
-    @classmethod
-    def _parse(cls, content: str) -> List[ip_network]:
+    def _parse(self, content: str) -> List[str]:
         networks = []
         for line in content.split('\n'):
-            matched = re.match(cls.REGEXP, line)
+            matched = re.match(self.REGEXP, line)
             if matched:
                 ip = matched.group('IP')
                 mask = matched.group('MASK')
                 if mask is None:
                     mask = '255.255.255.255'
-                networks.append(ip_network(f'{ip}/{mask}'))
+
+                networks.append(f'{ip}/{mask}')
 
         return networks
 
@@ -103,9 +103,8 @@ class ZaboronaHelp2(ZaboronaHelpBase):
 class UABlackList(Source):
     URL = 'https://uablacklist.net/subnets.json'
 
-    @classmethod
-    def _parse(cls, content: str) -> List[ip_network]:
-        return deserialize_networks(json.loads(content))
+    def _parse(self, content: str) -> List[str]:
+        return json.loads(content)
 
 
 class NetworksHandler:
@@ -114,19 +113,13 @@ class NetworksHandler:
         self.source_etags = None
         self.networks = None
 
-    def _load_sources_etags(sel):
-        pass
-        # TODO: continue
-
     def get_networks(self):
         self.networks = []
         for src in self.sources:
-            try:
-                networks = src.get()
-                print(f'Networks from source "{src.name()}" received. Got: {len(networks)} items.')
-                self.networks.extend(networks)
-            except Exception as error:
-                print(f'Error "{error}" while processing "{src.name()}" source.')
+            # TODO: deserealize "old" cache from source here to get difference with new cache (get only new networks and networks to delete)
+            etag, networks = src.get()  # TODO: etag is not used
+            print(f'Networks from source "{src.name}" received. Got: {len(networks)} items.')
+            self.networks.extend(deserialize_networks(networks))
 
         self.networks = list(collapse_addresses(self.networks))  # remove duplicates and optimization
         print(f'Total networks after optimization: {len(self.networks)} items.')
