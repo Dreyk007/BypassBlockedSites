@@ -6,6 +6,10 @@ from typing import List, Tuple
 import requests
 
 
+# TODO: bug with saving\loading cache (key error!)
+# TODO: how to save custom added routes (routes not from this app) in system routing table?
+
+
 def serialize_networks(networks: List[ip_network]) -> List[str]:
     return [str(ip_n) for ip_n in networks]
 
