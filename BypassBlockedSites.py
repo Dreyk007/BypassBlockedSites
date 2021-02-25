@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from ipaddress import ip_network, collapse_addresses
 from typing import List, Tuple
@@ -6,7 +7,6 @@ from typing import List, Tuple
 import requests
 
 
-# TODO: bug with saving\loading cache (key error!)
 # TODO: how to save custom added routes (routes not from this app) in system routing table?
 
 
@@ -18,37 +18,57 @@ def deserialize_networks(networks: List[str]) -> List[ip_network]:
     return [ip_network(ip_n) for ip_n in networks]
 
 
+def dump_json(data: (list, dict), filepath: str):
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def load_json(filepath: str) -> (list, dict):
+    with open(filepath, 'r') as f:
+        return json.load(f)
+
+
 class Source:
     URL: str = None
-    CACHE_FILE = 'cached_sources.json'
+    CACHE_DIR = 'cache'
+    CACHE_FILE = 'cache_{name}.json'
 
     def __init__(self):
-        self.cache = None
         self.last_etag = None
+        self.cache = None
+        self.cache_path = os.path.join(self.CACHE_DIR, self.CACHE_FILE.format(name=self.name))
+
+        self._prepare()
         self._read_cache()
 
     @property
     def name(self) -> str:
         return self.__class__.__name__
 
+    def _prepare(self):
+        if not os.path.exists(self.cache_path):
+            print(f'Cache path "{self.cache_path}" is not exists. Creating...')
+            if not os.path.exists(self.CACHE_DIR):
+                print(f'Cache dir "{self.CACHE_DIR}" is not exists. Creating...')
+                os.mkdir(self.CACHE_DIR)
+
+            empty_cache = {self.name: {'ETag': None,
+                                       'Networks': []}
+                           }
+            dump_json(empty_cache, self.cache_path)
+
     def _parse(self, content: str) -> List[str]:
         raise NotImplemented
 
     def _read_cache(self):
-        try:
-            with open(self.CACHE_FILE, 'r') as f:
-                self.cache = json.load(f)
-            self.last_etag = self.cache[self.name]['ETag']
-        except FileNotFoundError:
-            self.cache = {self.name: {'ETag': self.last_etag,
-                                      'Networks': []}}
+        self.cache = load_json(self.cache_path)
+        self.last_etag = self.cache[self.name]['ETag']
 
     def _save_cache(self, etag: str, networks: List[str]):
         self.last_etag = etag
         self.cache[self.name] = {'ETag': self.last_etag,
                                  'Networks': networks}
-        with open(self.CACHE_FILE, 'w') as f:
-            json.dump(self.cache, f, indent=2)
+        dump_json(self.cache, self.cache_path)
 
     def get(self) -> Tuple[str, List[str]]:
         if not self.URL:
