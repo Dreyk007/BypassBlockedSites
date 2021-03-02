@@ -1,9 +1,13 @@
 import re
-from subprocess import check_output
+from subprocess import run, check_output
 from typing import List
+
+from config import Config
 
 
 # TODO: so "routes" or "networks"?
+# TODO: where to create instance of Config to provide it everywhere?
+# TODO: need to save which ETag and routes are applied to the system. Also need to calc md5 for route sets (for comparing in client-server mode).
 
 
 class SystemRoutesHandlerBase:
@@ -16,25 +20,41 @@ class SystemRoutesHandlerBase:
         raise NotImplemented
 
     def get(self) -> List[str]:
-        routes_raw = check_output(self.COMMAND_TO_GET_ROUTES, encoding=self.ENCODING, shell=True)
+        routes_raw = self.exe_cmd(self.COMMAND_TO_GET_ROUTES, output=True)
         routes = self._parse(routes_raw)
 
         return routes
 
     def apply(self, routes_to_delete: List[str], routes_to_add: List[str]):
-        raise NotImplemented
+        for route in routes_to_delete:
+            self._del(route)
+
+        for route in routes_to_add:
+            self._add(route)
 
     def _add(self, route: str):
         raise NotImplemented
 
+    def _del(self, route: str):
+        raise NotImplemented
+
+    def exe_cmd(self, cmd: str, output: bool = False):
+        if not cmd:
+            raise NotImplemented
+        if output:
+            return check_output(cmd, encoding=self.ENCODING, shell=True)
+        run(cmd, check=False, shell=True)  # TODO: really don't check?
+
 
 class SystemRoutesHandlerLinux(SystemRoutesHandlerBase):
     COMMAND_TO_GET_ROUTES = 'ip route show'
-    COMMAND_TO_ADD_ROUTE = 'ip route add {route} via {vpn_gateway}'
+    COMMAND_TO_ADD_ROUTE = 'ip route add {route} via {ip_vpn_gateway}'
     COMMAND_TO_DELETE_ROUTE = 'ip route delete {route}'
     ENCODING = 'UTF-8'
 
-    REGEXP = r'(?P<IP>\d+\.\d+\.\d+\.\d+)(?:/(?P<MASK>\d+))? via \d+\.\d+\.\d+\.\d+'
+    REGEXP = r'(?P<IP>\d+\.\d+\.\d+\.\d+)(?:/(?P<MASK>\d+))? via {ip_vpn_gateway}'.format(
+        ip_vpn_gateway=Config.IP_VPN_GATEWAY.replace('.', r'\.')
+    )
 
     def _parse(self, routes_raw: str) -> List[str]:
         networks = []
@@ -49,7 +69,19 @@ class SystemRoutesHandlerLinux(SystemRoutesHandlerBase):
 
         return networks
 
+    def _add(self, route: str):
+        cmd = self.COMMAND_TO_ADD_ROUTE.format(route=route, ip_vpn_gateway=Config.IP_VPN_GATEWAY)
+        self.exe_cmd(cmd)
+
+    def _del(self, route: str):
+        cmd = self.COMMAND_TO_DELETE_ROUTE.format(route=route)
+        self.exe_cmd(cmd)
+
 
 if __name__ == '__main__':
     handler = SystemRoutesHandlerLinux()
+    print(handler.get())
+    handler.apply(routes_to_delete=[], routes_to_add=['8.8.8.8/32'])
+    print(handler.get())
+    handler.apply(routes_to_delete=['8.8.8.8/32'], routes_to_add=[])
     print(handler.get())

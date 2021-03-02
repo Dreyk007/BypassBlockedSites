@@ -79,7 +79,7 @@ class Source:
         if not new_etag or new_etag != self.last_etag:
             new_etag = None if not new_etag else new_etag  # Set to None if value is not valid
 
-            print('ETag is new or None. Download networks from source.')
+            print('ETag is new or not identified. Download networks from source.')
             try:
                 content = requests.get(self.URL).text
                 networks = self._parse(content)
@@ -89,7 +89,7 @@ class Source:
                 self._save_cache(new_etag, networks)
                 print('ETag and Networks are saved to cache.')
         else:
-            print('ETag is not identified or the same.')
+            print('ETag is the same as in the cache.')
 
         if networks is None:
             print('Return from cache.')
@@ -110,8 +110,9 @@ class ZaboronaHelpBase(Source):
                 mask = matched.group('MASK')
                 if mask is None:
                     mask = '255.255.255.255'
+                cidr = ip_network(f'{ip}/{mask}').with_prefixlen
 
-                networks.append(f'{ip}/{mask}')
+                networks.append(cidr)
 
         return networks
 
@@ -141,8 +142,10 @@ class NetworksHandler:
         self.networks = []
         for src in self.sources:
             # TODO: deserealize "old" cache from source here to get difference with new cache (get only new networks and networks to delete)
+            print(f'Processing source "{src.name}"...')
             etag, networks = src.get()  # TODO: etag is not used
             print(f'Networks from source "{src.name}" received. Got: {len(networks)} items.')
+            print()
             self.networks.extend(deserialize_networks(networks))
 
         self.networks = list(collapse_addresses(self.networks))  # remove duplicates and optimization
