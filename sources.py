@@ -6,26 +6,10 @@ from typing import List, Tuple
 
 import requests
 
+from tools import deserialize_networks, dump_json, load_json
+
 
 # TODO: how to save custom added routes (routes not from this app) in system routing table?
-
-
-def serialize_networks(networks: List[ip_network]) -> List[str]:
-    return [str(ip_n) for ip_n in networks]
-
-
-def deserialize_networks(networks: List[str]) -> List[ip_network]:
-    return [ip_network(ip_n) for ip_n in networks]
-
-
-def dump_json(data: (list, dict), filepath: str):
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=2)
-
-
-def load_json(filepath: str) -> (list, dict):
-    with open(filepath, 'r') as f:
-        return json.load(f)
 
 
 class Source:
@@ -76,7 +60,7 @@ class Source:
 
         networks = None
         new_etag = requests.head(self.URL).headers.get('ETAG', None)
-        if not new_etag or new_etag != self.last_etag:
+        if not new_etag or new_etag != self.last_etag:  # TODO: need to write UnitTests
             new_etag = None if not new_etag else new_etag  # Set to None if value is not valid
 
             print('ETag is new or not identified. Download networks from source.')

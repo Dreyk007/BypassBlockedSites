@@ -43,17 +43,17 @@ class SystemRoutesHandlerBase:
             raise NotImplemented
         if output:
             return check_output(cmd, encoding=self.ENCODING, shell=True)
-        run(cmd, check=False, shell=True)  # TODO: really don't check?
+        run(cmd, check=True, shell=True)
 
 
 class SystemRoutesHandlerLinux(SystemRoutesHandlerBase):
     COMMAND_TO_GET_ROUTES = 'ip route show'
-    COMMAND_TO_ADD_ROUTE = 'ip route add {route} via {ip_vpn_gateway}'
-    COMMAND_TO_DELETE_ROUTE = 'ip route delete {route}'
+    COMMAND_TO_ADD_ROUTE = 'ip route add {route} dev {ip_vpn_devname}'
+    COMMAND_TO_DELETE_ROUTE = 'ip route delete {route} dev {ip_vpn_devname}'
     ENCODING = 'UTF-8'
 
-    REGEXP = r'(?P<IP>\d+\.\d+\.\d+\.\d+)(?:/(?P<MASK>\d+))? via {ip_vpn_gateway}'.format(
-        ip_vpn_gateway=Config.IP_VPN_GATEWAY.replace('.', r'\.')
+    REGEXP = r'(?P<IP>\d+\.\d+\.\d+\.\d+)(?:/(?P<MASK>\d+))? dev {ip_vpn_devname}'.format(
+        ip_vpn_devname=Config.IP_VPN_DEVNAME
     )
 
     def _parse(self, routes_raw: str) -> List[str]:
@@ -70,11 +70,11 @@ class SystemRoutesHandlerLinux(SystemRoutesHandlerBase):
         return networks
 
     def _add(self, route: str):
-        cmd = self.COMMAND_TO_ADD_ROUTE.format(route=route, ip_vpn_gateway=Config.IP_VPN_GATEWAY)
+        cmd = self.COMMAND_TO_ADD_ROUTE.format(route=route, ip_vpn_devname=Config.IP_VPN_DEVNAME)
         self.exe_cmd(cmd)
 
     def _del(self, route: str):
-        cmd = self.COMMAND_TO_DELETE_ROUTE.format(route=route)
+        cmd = self.COMMAND_TO_DELETE_ROUTE.format(route=route, ip_vpn_devname=Config.IP_VPN_DEVNAME)
         self.exe_cmd(cmd)
 
 
